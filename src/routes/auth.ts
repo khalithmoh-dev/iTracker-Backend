@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { UserModel } from '../models/User';
+import e from 'express';
 
 const router = express.Router();
 const SALT_ROUNDS = 10;
@@ -46,6 +47,8 @@ router.post('/register', async (req: Request, res: Response) => {
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
+    console.log('user email',email);
+    console.log('user password',password);
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password required' });
     }
