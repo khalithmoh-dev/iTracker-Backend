@@ -27,8 +27,7 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors({
-  origin: ['https://itracker-es0n.onrender.com/', 'http://localhost:3000'],
-  credentials: true
+  origin: '*'
 }));
 app.use(express.json());
 // Routes
