@@ -6,6 +6,8 @@ const ALPHA_VANTAGE_API = 'https://www.alphavantage.co/query';
 interface PriceData {
   price: number;
   currency: string;
+  pricePerGramUSD?: number;
+  usdToInr?: number;
 }
 
 // Get USD to INR conversion rate
@@ -172,16 +174,21 @@ export const getGoldPrice = async (): Promise<PriceData | null> => {
   try {
     try {
       const response = await axios.get('https://api.metals.live/v1/spot/gold', { timeout: 5000 });
+      console.log('response------------------')
+      console.log(response.data)
       if (response.data && Array.isArray(response.data) && response.data[0]?.price) {
         const pricePerOunceUSD = response.data[0].price;
         const pricePerGramUSD = pricePerOunceUSD / 31.1035;
         const usdToInr = await getUSDToINR();
         return {
+          pricePerGramUSD,
+          usdToInr,
           price: pricePerGramUSD * usdToInr,
           currency: 'INR',
         };
       }
     } catch (e) {
+      console.log('from fallback', e);
       // Continue to next option
     }
 
@@ -218,6 +225,7 @@ export const getGoldPrice = async (): Promise<PriceData | null> => {
         };
       }
     } catch (e) {
+      console.log('from fallback', e);
       // Continue to fallback
     }
 
