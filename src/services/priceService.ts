@@ -38,6 +38,7 @@ export const getCryptoPrice = async (symbol: string): Promise<PriceData | null> 
       'DOT': 'polkadot',
       'MATIC': 'matic-network',
       'LTC': 'litecoin',
+      'CRO': 'cronos'
     };
 
     const coinId = symbolMap[symbol.toUpperCase()] || symbol.toLowerCase();
@@ -78,97 +79,129 @@ export const getCryptoPrice = async (symbol: string): Promise<PriceData | null> 
 };
 
 // Get stock price in INR using Alpha Vantage API
+
 export const getStockPrice = async (symbol: string): Promise<PriceData | null> => {
-  const symbolUpper = symbol.toUpperCase();
+  const finnhubKey = process.env.FINNHUB_API_KEY;
   const alphaVantageKey = process.env.ALPHA_VANTAGE_API_KEY;
-  
+  const googleSheetCsvUrl = process.env.GOOGLE_SHEET_CSV_URL;
+
+  // Normalize symbol: WIPRO → WIPRO, TCS → TCS
+  const ticker = symbol.toUpperCase();
+
+  // Finnhub & AlphaVantage require NSE format WIPRO.NS
+  const nseSymbol = ticker.endsWith(".NS") ? ticker : `${ticker}.NS`;
+
+
+  // ---------------------------------------------
+  // 1️⃣ GOOGLE SHEETS (GOOGLEFINANCE) - Primary
+  // ---------------------------------------------
+ if (googleSheetCsvUrl) {
+  try {
+    const csvResponse = await axios.get(googleSheetCsvUrl);
+    const csv = csvResponse.data;
+
+    const rows = csv
+      .trim()
+      .split("\n")
+      .map((line: string) => line.split(","));
+    // Each row will have Stock Symbol,NSE Stock ticker and current price
+    const targetSymbol = symbol.toUpperCase();
+
+    // Find the row matching the stock symbol
+    const targetRow = rows.find((r: string[]) => r[0]?.trim().toUpperCase() === targetSymbol);
+
+    if (targetRow && targetRow[2]) {
+      const price = parseFloat(targetRow[2].replace(/[^0-9.]/g, ""));
+
+      if (!isNaN(price) && price > 0) {
+        return {
+          price,
+          currency: "INR",
+        };
+      }
+    }
+
+  } catch (err: any) {
+    console.warn("Google Sheets failed, trying Finnhub:", err.message);
+  }
+}
+
+
+
+  // ---------------------------------------------
+  // 2️⃣ FINNHUB - Secondary
+  // ---------------------------------------------
+  if (finnhubKey) {
+    try {
+      const finnhubUrl = `https://finnhub.io/api/v1/quote`;
+
+      const response = await axios.get(finnhubUrl, {
+        params: {
+          symbol: nseSymbol,
+          token: finnhubKey,
+        },
+        timeout: 8000,
+      });
+
+      const data = response.data;
+
+      if (data?.c && data.c > 0) {
+        return {
+          price: data.c, // Finnhub returns INR for NSE
+          currency: "INR",
+        };
+      }
+    } catch (err: any) {
+      console.warn("Finnhub failed, falling back to Alpha Vantage:", err.message);
+    }
+  }
+
+
+  // ---------------------------------------------
+  // 3️⃣ ALPHA VANTAGE - Final fallback
+  // ---------------------------------------------
   if (!alphaVantageKey) {
-    console.warn('Alpha Vantage API key not configured.');
+    console.warn("Alpha Vantage key missing — cannot fallback");
     return null;
   }
 
   try {
-    let formattedSymbol = symbolUpper;
-    if (!symbolUpper.includes(':') && !symbolUpper.includes('.')) {
-      formattedSymbol = `NSE:${symbolUpper}`;
+    const response = await axios.get(ALPHA_VANTAGE_API, {
+      params: {
+        function: "GLOBAL_QUOTE",
+        symbol: nseSymbol,
+        apikey: alphaVantageKey,
+      },
+      timeout: 8000,
+    });
+
+    const quote = response?.data?.["Global Quote"];
+
+    if (!quote || !quote["05. price"]) {
+      console.warn("Alpha Vantage: price not found");
+      return null;
     }
 
-    try {
-      const response = await axios.get(ALPHA_VANTAGE_API, {
-        params: {
-          function: 'GLOBAL_QUOTE',
-          symbol: formattedSymbol,
-          apikey: alphaVantageKey,
-        },
-        timeout: 10000,
-      });
-      
-      if (response.data?.['Global Quote']?.['05. price']) {
-        const priceStr = response.data['Global Quote']['05. price'];
-        const price = parseFloat(priceStr);
-        
-        if (price && price > 0) {
-          const currency = response.data['Global Quote']['08. currency'] || 'INR';
-          
-          if (currency === 'INR') {
-            return {
-              price: price,
-              currency: 'INR',
-            };
-          } else {
-            const usdToInr = await getUSDToINR();
-            return {
-              price: price * usdToInr,
-              currency: 'INR',
-            };
-          }
-        }
-      }
-    } catch (e: any) {
-      if (formattedSymbol.startsWith('NSE:') && e.response?.status !== 429) {
-        try {
-          const response = await axios.get(ALPHA_VANTAGE_API, {
-            params: {
-              function: 'GLOBAL_QUOTE',
-              symbol: symbolUpper,
-              apikey: alphaVantageKey,
-            },
-            timeout: 10000,
-          });
-          
-          if (response.data?.['Global Quote']?.['05. price']) {
-            const priceStr = response.data['Global Quote']['05. price'];
-            const price = parseFloat(priceStr);
-            
-            if (price && price > 0) {
-              const currency = response.data['Global Quote']['08. currency'] || 'INR';
-              
-              if (currency === 'INR') {
-                return {
-                  price: price,
-                  currency: 'INR',
-                };
-              } else {
-                const usdToInr = await getUSDToINR();
-                return {
-                  price: price * usdToInr,
-                  currency: 'INR',
-                };
-              }
-            }
-          }
-        } catch (e2: any) {
-          console.warn('Alpha Vantage API failed:', e2.message || 'Unknown error');
-        }
-      }
-    }
+    const priceUSD = parseFloat(quote["05. price"]);
+    if (!priceUSD || priceUSD <= 0) return null;
 
-    return null;
-  } catch (error) {
-    console.error('Error fetching stock price:', error);
+    // Convert USD → INR
+    const usdToInr = await getUSDToINR();
+    const priceINR = priceUSD * usdToInr;
+
+    return {
+      price: priceINR,
+      currency: "INR",
+    };
+
+  } catch (err: any) {
+    console.error("Alpha Vantage fallback failed:", err.message);
     return null;
   }
 };
+
+
+
 type PriceDatas = {
   data: {
     rates: any
@@ -179,11 +212,11 @@ type PriceDatas = {
 export const getGoldPrice = async (): Promise<PriceData | null> => {
   try {
     try {
-      const response: PriceDatas = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=7e750275f694ffd364418383ee939c88&base=INR&currencies=XAU', { timeout: 5000 });
+      // const response: PriceDatas = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=7e750275f694ffd364418383ee939c88&base=INR&currencies=XAU', { timeout: 5000 });
       
-      // const response: PriceDatas = {data : {
-      //   rates: { INRXAU: 367823.1615446534, XAU: 0.0000027187 }
-      // }}
+      const response: PriceDatas = {data : {
+        rates: { INRXAU: 367823.1615446534, XAU: 0.0000027187 }
+      }}
       if (response.data && response.data?.rates) {
         const pricePerOunceUSD = response.data?.rates?.INRXAU;
         const pricePerGram = pricePerOunceUSD / 31.1035;
