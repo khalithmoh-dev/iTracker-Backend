@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { types } from 'util';
 
 const COINGECKO_API = 'https://api.coingecko.com/api/v3';
 const ALPHA_VANTAGE_API = 'https://www.alphavantage.co/query';
@@ -168,22 +169,26 @@ export const getStockPrice = async (symbol: string): Promise<PriceData | null> =
     return null;
   }
 };
+type PriceDatas = {
+  data: {
+    rates: any
+  };
+};
 
 // Get gold price per gram in INR
 export const getGoldPrice = async (): Promise<PriceData | null> => {
   try {
     try {
-      const response = await axios.get('https://api.metals.live/v1/spot/gold', { timeout: 5000 });
-      console.log('response------------------')
-      console.log(response.data)
-      if (response.data && Array.isArray(response.data) && response.data[0]?.price) {
-        const pricePerOunceUSD = response.data[0].price;
-        const pricePerGramUSD = pricePerOunceUSD / 31.1035;
-        const usdToInr = await getUSDToINR();
+      const response: PriceDatas = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=7e750275f694ffd364418383ee939c88&base=INR&currencies=XAU', { timeout: 5000 });
+      
+      // const response: PriceDatas = {data : {
+      //   rates: { INRXAU: 367823.1615446534, XAU: 0.0000027187 }
+      // }}
+      if (response.data && response.data?.rates) {
+        const pricePerOunceUSD = response.data?.rates?.INRXAU;
+        const pricePerGram = pricePerOunceUSD / 31.1035;
         return {
-          pricePerGramUSD,
-          usdToInr,
-          price: pricePerGramUSD * usdToInr,
+          price: pricePerGram,
           currency: 'INR',
         };
       }
@@ -192,42 +197,42 @@ export const getGoldPrice = async (): Promise<PriceData | null> => {
       // Continue to next option
     }
 
-    try {
-      const response = await axios.get(`${COINGECKO_API}/simple/price`, {
-        params: {
-          ids: 'pax-gold',
-          vs_currencies: 'inr',
-        },
-        timeout: 5000,
-      });
-      if (response.data?.['pax-gold']?.inr) {
-        const pricePerGram = response.data['pax-gold'].inr / 31.1035;
-        return {
-          price: pricePerGram,
-          currency: 'INR',
-        };
-      }
+    // try {
+    //   const response = await axios.get(`${COINGECKO_API}/simple/price`, {
+    //     params: {
+    //       ids: 'pax-gold',
+    //       vs_currencies: 'inr',
+    //     },
+    //     timeout: 5000,
+    //   });
+    //   if (response.data?.['pax-gold']?.inr) {
+    //     const pricePerGram = response.data['pax-gold'].inr / 31.1035;
+    //     return {
+    //       price: pricePerGram,
+    //       currency: 'INR',
+    //     };
+    //   }
       
-      const usdResponse = await axios.get(`${COINGECKO_API}/simple/price`, {
-        params: {
-          ids: 'pax-gold',
-          vs_currencies: 'usd',
-        },
-        timeout: 5000,
-      });
-      if (usdResponse.data?.['pax-gold']?.usd) {
-        const pricePerOunceUSD = usdResponse.data['pax-gold'].usd;
-        const pricePerGramUSD = pricePerOunceUSD / 31.1035;
-        const usdToInr = await getUSDToINR();
-        return {
-          price: pricePerGramUSD * usdToInr,
-          currency: 'INR',
-        };
-      }
-    } catch (e) {
-      console.log('from fallback', e);
-      // Continue to fallback
-    }
+    //   const usdResponse = await axios.get(`${COINGECKO_API}/simple/price`, {
+    //     params: {
+    //       ids: 'pax-gold',
+    //       vs_currencies: 'usd',
+    //     },
+    //     timeout: 5000,
+    //   });
+    //   if (usdResponse.data?.['pax-gold']?.usd) {
+    //     const pricePerOunceUSD = usdResponse.data['pax-gold'].usd;
+    //     const pricePerGramUSD = pricePerOunceUSD / 31.1035;
+    //     const usdToInr = await getUSDToINR();
+    //     return {
+    //       price: pricePerGramUSD * usdToInr,
+    //       currency: 'INR',
+    //     };
+    //   }
+    // } catch (e) {
+    //   console.log('from fallback', e);
+    //   // Continue to fallback
+    // }
 
     console.warn('Using fallback gold price.');
     return {
